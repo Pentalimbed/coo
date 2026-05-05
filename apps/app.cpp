@@ -72,12 +72,12 @@ void App::initVulkan()
     vk::Viewport                             viewport{
         .x        = 0.0F,
         .y        = 0.0F,
-        .width    = static_cast<float>(swap_chain_.create_info.imageExtent.width),
-        .height   = static_cast<float>(swap_chain_.create_info.imageExtent.height),
+        .width    = static_cast<float>(swap_chain_.extent.width),
+        .height   = static_cast<float>(swap_chain_.extent.height),
         .minDepth = 0.0F,
         .maxDepth = 1.0F,
     };
-    vk::Rect2D                          scissor        = {vk::Offset2D{0, 0}, swap_chain_.create_info.imageExtent};
+    vk::Rect2D                          scissor        = {vk::Offset2D{0, 0}, swap_chain_.extent};
     vk::PipelineViewportStateCreateInfo viewport_state = {.viewportCount = 1, .pViewports = &viewport, .scissorCount = 1, .pScissors = &scissor};
 
     vk::PipelineRasterizationStateCreateInfo rasterizer{
@@ -115,7 +115,7 @@ void App::initVulkan()
         },
         vk::PipelineRenderingCreateInfo{
             .colorAttachmentCount    = 1,
-            .pColorAttachmentFormats = &swap_chain_.create_info.imageFormat,
+            .pColorAttachmentFormats = &swap_chain_.surface_format.format,
         },
     };
     m_graphics_pipeline = vk::raii::Pipeline(device_.logical, nullptr, pipeline_create_info_chain.get<vk::GraphicsPipelineCreateInfo>());
@@ -207,7 +207,7 @@ void App::recordCmdBuffer(uint32_t image_index)
     // Set up the color attachment
     vk::ClearValue              clear_color     = vk::ClearColorValue(0.0F, 0.0F, 0.0F, 1.0F);
     vk::RenderingAttachmentInfo attachment_info = {
-        .imageView   = swap_chain_.image_views[image_index],
+        .imageView   = swap_chain_.getImageView(device_.logical, image_index),
         .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
         .loadOp      = vk::AttachmentLoadOp::eClear,
         .storeOp     = vk::AttachmentStoreOp::eStore,
@@ -215,7 +215,7 @@ void App::recordCmdBuffer(uint32_t image_index)
 
     // Set up the rendering info
     vk::RenderingInfo rendering_info = {
-        .renderArea           = {.offset = {0, 0}, .extent = swap_chain_.create_info.imageExtent},
+        .renderArea           = {.offset = {0, 0}, .extent = swap_chain_.extent},
         .layerCount           = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments    = &attachment_info};
@@ -225,8 +225,8 @@ void App::recordCmdBuffer(uint32_t image_index)
 
     // Rendering commands will go here
     m_command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_graphics_pipeline);
-    m_command_buffer.setViewport(0, vk::Viewport(0.0F, 0.0F, static_cast<float>(swap_chain_.create_info.imageExtent.width), static_cast<float>(swap_chain_.create_info.imageExtent.height), 0.0F, 1.0F));
-    m_command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swap_chain_.create_info.imageExtent));
+    m_command_buffer.setViewport(0, vk::Viewport(0.0F, 0.0F, static_cast<float>(swap_chain_.extent.width), static_cast<float>(swap_chain_.extent.height), 0.0F, 1.0F));
+    m_command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swap_chain_.extent));
     m_command_buffer.draw(3, 1, 0, 0);
 
     // End rendering

@@ -77,8 +77,10 @@ Device createDevice(vk::raii::Instance const& instance, vk::raii::SurfaceKHR con
 /// SwapChain
 /// ---------------------------------------------------------------------------------------------------------
 struct SwapChain {
-    vk::raii::SwapchainKHR           chain = nullptr;
-    vk::SwapchainCreateInfoKHR       create_info;
+    vk::raii::SwapchainKHR chain          = nullptr;
+    vk::SurfaceFormatKHR   surface_format = {};
+    vk::Extent2D           extent         = {};
+
     std::vector<vk::Image>           images;
     std::vector<vk::raii::ImageView> image_views;
 
@@ -88,6 +90,11 @@ struct SwapChain {
         images.clear();
         chain = nullptr;
     }
+
+    // deferred initialization
+    vk::ImageView getImageView(
+        vk::raii::Device const& device,
+        uint32_t                index);
 };
 
 SwapChain createSwapchain(
