@@ -5,6 +5,7 @@
 #include <vulkan/vulkan_raii.hpp>
 
 #include <array>
+#include <memory>
 #include <mutex>
 
 namespace vulkan {
@@ -20,29 +21,74 @@ struct QueueIndex {
     uint32_t queue;
 };
 
+/// ---------------------------------------------------------------------------------------------------------
+/// FencePool
+/// ---------------------------------------------------------------------------------------------------------
 class FencePool {
-    std::vector<vk::raii::Fence> fences_;
+    std::vector<vk::raii::Fence> pool_;
     std::mutex                   mutex_;
 
-public:
-    vk::raii::Fence acquire(vk::raii::Device const& device)
-    {
-        auto lock = std::scoped_lock(mutex_);
-        if (fences_.empty()) {
-            return vk::raii::Fence(device, {.flags = vk::FenceCreateFlagBits::eSignaled});
-        }
-        auto fence = std::move(fences_.back());
-        fences_.pop_back();
-        return fence;
-    }
-
-    void recycle(vk::raii::Device const& device, vk::raii::Fence&& fence)
+    void recycle(vk::Device device, vk::raii::Fence&& fence)
     {
         auto lock = std::scoped_lock(mutex_);
         device.resetFences(*fence);
-        fences_.push_back(std::move(fence));
+        pool_.push_back(std::move(fence));
+    }
+
+public:
+    struct Recycler {
+        vk::Device device;
+        FencePool* pool;
+        void       operator()(vk::raii::Fence* obj) const { pool->recycle(device, std::move(*obj)); }
+    };
+    using Handle = std::unique_ptr<vk::raii::Fence, Recycler>; // caution: destroy order
+
+    Handle acquire(vk::raii::Device const& device)
+    {
+        auto lock     = std::scoped_lock(mutex_);
+        auto recycler = Recycler{.device = device, .pool = this};
+        if (pool_.empty())
+            return {new vk::raii::Fence(device, {.flags = vk::FenceCreateFlagBits::eSignaled}), recycler};
+        auto fence = std::move(pool_.back());
+        pool_.pop_back();
+        return {new vk::raii::Fence(std::move(fence)), recycler};
     }
 };
+using Fence = FencePool::Handle;
+
+/// ---------------------------------------------------------------------------------------------------------
+/// SemaphorePool
+/// ---------------------------------------------------------------------------------------------------------
+class SemaphorePool {
+    std::vector<vk::raii::Semaphore> pool_;
+    std::mutex                       mutex_;
+
+    void recycle(vk::raii::Semaphore&& fence)
+    {
+        auto lock = std::scoped_lock(mutex_);
+        pool_.push_back(std::move(fence));
+    }
+
+public:
+    struct Recycler {
+        SemaphorePool* pool;
+        void           operator()(vk::raii::Semaphore* obj) const { pool->recycle(std::move(*obj)); }
+    };
+    using Handle = std::unique_ptr<vk::raii::Semaphore, Recycler>; // caution: destroy order
+
+    Handle acquire(vk::raii::Device const& device)
+    {
+        auto lock     = std::scoped_lock(mutex_);
+        auto recycler = Recycler{.pool = this};
+        if (pool_.empty()) {
+            return {new vk::raii::Semaphore(device, {}), recycler};
+        }
+        auto semaphore = std::move(pool_.back());
+        pool_.pop_back();
+        return {new vk::raii::Semaphore(std::move(semaphore)), recycler};
+    }
+};
+using Semaphore = SemaphorePool::Handle;
 
 /// ---------------------------------------------------------------------------------------------------------
 /// Context

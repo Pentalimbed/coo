@@ -7,6 +7,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+// TODO pack device
 // TODO pack command pool
 // TODO Frames-in-flight
 // TODO timeline semaphore
