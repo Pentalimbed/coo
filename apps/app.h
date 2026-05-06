@@ -47,6 +47,6 @@ private:
 
     void recreateSwapChain();
 
-    void recordCmdBuffer(uint32_t image_index);
+    void recordCmdBuffer(vk::Image swap_img, vk::ImageView swap_img_view);
     void drawFrame();
 };

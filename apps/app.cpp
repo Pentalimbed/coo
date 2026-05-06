@@ -46,7 +46,7 @@ void App::initVulkan()
 
     device_ = vulkan::createDevice(context_.instance, surface_);
     
-    swap_chain_ = vulkan::createSwapchain(device_.physical, device_.logical, surface_);
+    swap_chain_.init(device_.physical, device_.logical, surface_);
 
     // Pipeline
     vk::raii::ShaderModule             shader_module  = createShaderModule(device_.logical, kHelloTriSpvData);
@@ -72,12 +72,12 @@ void App::initVulkan()
     vk::Viewport                             viewport{
         .x        = 0.0F,
         .y        = 0.0F,
-        .width    = static_cast<float>(swap_chain_.extent.width),
-        .height   = static_cast<float>(swap_chain_.extent.height),
+        .width    = static_cast<float>(swap_chain_.getExtent().width),
+        .height   = static_cast<float>(swap_chain_.getExtent().height),
         .minDepth = 0.0F,
         .maxDepth = 1.0F,
     };
-    vk::Rect2D                          scissor        = {vk::Offset2D{0, 0}, swap_chain_.extent};
+    vk::Rect2D                          scissor        = {vk::Offset2D{0, 0}, swap_chain_.getExtent()};
     vk::PipelineViewportStateCreateInfo viewport_state = {.viewportCount = 1, .pViewports = &viewport, .scissorCount = 1, .pScissors = &scissor};
 
     vk::PipelineRasterizationStateCreateInfo rasterizer{
@@ -115,7 +115,7 @@ void App::initVulkan()
         },
         vk::PipelineRenderingCreateInfo{
             .colorAttachmentCount    = 1,
-            .pColorAttachmentFormats = &swap_chain_.surface_format.format,
+            .pColorAttachmentFormats = &swap_chain_.getFormat().format,
         },
     };
     m_graphics_pipeline = vk::raii::Pipeline(device_.logical, nullptr, pipeline_create_info_chain.get<vk::GraphicsPipelineCreateInfo>());
@@ -148,8 +148,6 @@ void App::mainLoop()
 
 void App::cleanup()
 {
-    swap_chain_.clear();
-
     glfwDestroyWindow(window_);
     glfwTerminate();
 }
@@ -169,11 +167,10 @@ void App::recreateSwapChain()
         throw std::runtime_error("failed to wait for fence!");
     }
 
-    swap_chain_.clear();
-    swap_chain_         = vulkan::createSwapchain(device_.physical, device_.logical, surface_);
+    swap_chain_.init(device_.physical, device_.logical, surface_);
 }
 
-void App::recordCmdBuffer(uint32_t image_index)
+void App::recordCmdBuffer(vk::Image swap_img, vk::ImageView swap_img_view)
 {
     m_command_buffer.begin({});
 
@@ -188,7 +185,7 @@ void App::recordCmdBuffer(uint32_t image_index)
             .newLayout           = vk::ImageLayout::eColorAttachmentOptimal,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image               = swap_chain_.images[image_index],
+            .image               = swap_img,
             .subresourceRange    = {
                 .aspectMask     = vk::ImageAspectFlagBits::eColor,
                 .baseMipLevel   = 0,
@@ -207,7 +204,7 @@ void App::recordCmdBuffer(uint32_t image_index)
     // Set up the color attachment
     vk::ClearValue              clear_color     = vk::ClearColorValue(0.0F, 0.0F, 0.0F, 1.0F);
     vk::RenderingAttachmentInfo attachment_info = {
-        .imageView   = swap_chain_.getImageView(device_.logical, image_index),
+        .imageView   = swap_img_view,
         .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
         .loadOp      = vk::AttachmentLoadOp::eClear,
         .storeOp     = vk::AttachmentStoreOp::eStore,
@@ -215,7 +212,7 @@ void App::recordCmdBuffer(uint32_t image_index)
 
     // Set up the rendering info
     vk::RenderingInfo rendering_info = {
-        .renderArea           = {.offset = {0, 0}, .extent = swap_chain_.extent},
+        .renderArea           = {.offset = {0, 0}, .extent = swap_chain_.getExtent()},
         .layerCount           = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments    = &attachment_info};
@@ -225,8 +222,8 @@ void App::recordCmdBuffer(uint32_t image_index)
 
     // Rendering commands will go here
     m_command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_graphics_pipeline);
-    m_command_buffer.setViewport(0, vk::Viewport(0.0F, 0.0F, static_cast<float>(swap_chain_.extent.width), static_cast<float>(swap_chain_.extent.height), 0.0F, 1.0F));
-    m_command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swap_chain_.extent));
+    m_command_buffer.setViewport(0, vk::Viewport(0.0F, 0.0F, static_cast<float>(swap_chain_.getExtent().width), static_cast<float>(swap_chain_.getExtent().height), 0.0F, 1.0F));
+    m_command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swap_chain_.getExtent()));
     m_command_buffer.draw(3, 1, 0, 0);
 
     // End rendering
@@ -243,7 +240,7 @@ void App::recordCmdBuffer(uint32_t image_index)
             .newLayout           = vk::ImageLayout::ePresentSrcKHR,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image               = swap_chain_.images[image_index],
+            .image               = swap_img,
             .subresourceRange    = {
                 .aspectMask     = vk::ImageAspectFlagBits::eColor,
                 .baseMipLevel   = 0,
@@ -269,7 +266,7 @@ void App::drawFrame()
         throw std::runtime_error("failed to wait for fence!");
     }
 
-    auto [result, image_index] = swap_chain_.chain.acquireNextImage(UINT64_MAX, m_acquire_semaphore, nullptr);
+    auto [result, img_index, swap_img, swap_img_view] = swap_chain_.acquireNextImage(device_.logical, UINT64_MAX, m_acquire_semaphore, nullptr);
     if (result == vk::Result::eErrorOutOfDateKHR) {
         recreateSwapChain();
         return;
@@ -280,7 +277,7 @@ void App::drawFrame()
     }
 
     // Render and present
-    recordCmdBuffer(image_index);
+    recordCmdBuffer(swap_img, swap_img_view);
 
     vk::PipelineStageFlags wait_destination_stage_mask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
     const vk::SubmitInfo   submit_info{
@@ -302,8 +299,8 @@ void App::drawFrame()
             .waitSemaphoreCount = 1,
             .pWaitSemaphores    = &*m_submit_semaphore,
             .swapchainCount     = 1,
-            .pSwapchains        = &*swap_chain_.chain,
-            .pImageIndices      = &image_index,
+            .pSwapchains        = &*swap_chain_.get(),
+            .pImageIndices      = &img_index,
         },
         vk::SwapchainPresentFenceInfoEXT{
             .swapchainCount = 1,

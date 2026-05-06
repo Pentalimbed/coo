@@ -303,27 +303,29 @@ Device createDevice(vk::raii::Instance const& instance, vk::raii::SurfaceKHR con
     return device;
 }
 
-SwapChain createSwapchain(
+void SwapChain::init(
     vk::raii::PhysicalDevice const& physical_device,
     vk::raii::Device const&         device,
     vk::raii::SurfaceKHR const&     surface)
 {
-    SwapChain swapchain;
+    image_views_.clear();
+    images_.clear();
+    chain_.clear(); // TODO use old chain
 
     auto surface_caps            = physical_device.getSurfaceCapabilitiesKHR(*surface);
     auto available_formats       = physical_device.getSurfaceFormatsKHR(*surface);
     auto available_present_modes = physical_device.getSurfacePresentModesKHR(surface);
 
-    swapchain.surface_format = chooseSwapSurfaceFormat(available_formats);
-    swapchain.extent         = chooseSwapExtent(surface_caps);
+    surface_format_ = chooseSwapSurfaceFormat(available_formats);
+    extent_         = chooseSwapExtent(surface_caps);
 
     vk::SwapchainCreateInfoKHR create_info = {
         .flags            = vk::SwapchainCreateFlagBitsKHR::eDeferredMemoryAllocationEXT,
         .surface          = surface,
         .minImageCount    = chooseSwapMinImageCount(surface_caps),
-        .imageFormat      = swapchain.surface_format.format,
-        .imageColorSpace  = swapchain.surface_format.colorSpace,
-        .imageExtent      = swapchain.extent,
+        .imageFormat      = surface_format_.format,
+        .imageColorSpace  = surface_format_.colorSpace,
+        .imageExtent      = extent_,
         .imageArrayLayers = 1,
         .imageUsage       = vk::ImageUsageFlagBits::eColorAttachment,
         .imageSharingMode = vk::SharingMode::eExclusive,
@@ -332,23 +334,27 @@ SwapChain createSwapchain(
         .presentMode      = chooseSwapPresentMode(available_present_modes),
         .clipped          = 1U,
     };
-    swapchain.chain  = vk::raii::SwapchainKHR(device, create_info);
-    swapchain.images = swapchain.chain.getImages();
-    for (size_t i = 0; i < swapchain.images.size(); i++)
-        swapchain.image_views.emplace_back(nullptr);
-
-    return swapchain;
+    chain_  = vk::raii::SwapchainKHR(device, create_info);
+    images_ = chain_.getImages();
+    for (size_t i = 0; i < images_.size(); i++)
+        image_views_.emplace_back(nullptr);
 }
 
-vk::ImageView SwapChain::getImageView(
+std::tuple<vk::Result, uint32_t, vk::Image, vk::ImageView> SwapChain::acquireNextImage(
     vk::raii::Device const& device,
-    uint32_t                index)
+    uint64_t                timeout,
+    vk::Semaphore           semaphore,
+    vk::Fence               fence)
 {
-    if (image_views.at(index) == nullptr) {
+    auto [result, index] = chain_.acquireNextImage(timeout, semaphore, fence);
+    if ((result != vk::Result::eSuccess) && (result != vk::Result::eSuboptimalKHR))
+        return {result, index, nullptr, nullptr};
+
+    if (image_views_.at(index) == nullptr) {
         vk::ImageViewCreateInfo image_view_create_info{
-            .image            = images[index],
+            .image            = images_[index],
             .viewType         = vk::ImageViewType::e2D,
-            .format           = surface_format.format,
+            .format           = surface_format_.format,
             .components       = {},
             .subresourceRange = {
                 .aspectMask     = vk::ImageAspectFlagBits::eColor,
@@ -358,9 +364,8 @@ vk::ImageView SwapChain::getImageView(
                 .layerCount     = 1,
             },
         };
-        image_views.at(index) = vk::raii::ImageView(device, image_view_create_info);
+        image_views_.at(index) = vk::raii::ImageView(device, image_view_create_info);
     }
-
-    return image_views.at(index);
+    return {result, index, images_.at(index), image_views_.at(index)};
 }
 } // namespace vulkan

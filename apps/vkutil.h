@@ -47,7 +47,7 @@ public:
 /// ---------------------------------------------------------------------------------------------------------
 /// Context
 /// ---------------------------------------------------------------------------------------------------------
-struct Context{
+struct Context {
     vk::raii::Context                context;
     vk::raii::Instance               instance        = nullptr;
     vk::raii::DebugUtilsMessengerEXT debug_messenger = nullptr;
@@ -58,7 +58,7 @@ Context createContext();
 /// ---------------------------------------------------------------------------------------------------------
 /// Device
 /// ---------------------------------------------------------------------------------------------------------
-struct Device{
+struct Device {
     vk::raii::PhysicalDevice physical = nullptr;
     vk::raii::Device         logical  = nullptr;
 
@@ -76,29 +76,35 @@ Device createDevice(vk::raii::Instance const& instance, vk::raii::SurfaceKHR con
 /// ---------------------------------------------------------------------------------------------------------
 /// SwapChain
 /// ---------------------------------------------------------------------------------------------------------
-struct SwapChain {
-    vk::raii::SwapchainKHR chain          = nullptr;
-    vk::SurfaceFormatKHR   surface_format = {};
-    vk::Extent2D           extent         = {};
+class SwapChain {
+    vk::raii::SwapchainKHR chain_          = nullptr;
+    vk::SurfaceFormatKHR   surface_format_ = {};
+    vk::Extent2D           extent_         = {};
 
-    std::vector<vk::Image>           images;
-    std::vector<vk::raii::ImageView> image_views;
+    std::vector<vk::Image>           images_;
+    std::vector<vk::raii::ImageView> image_views_;
+
+public:
+    void init(
+        vk::raii::PhysicalDevice const& physical_device,
+        vk::raii::Device const&         device,
+        vk::raii::SurfaceKHR const&     surface);
 
     void clear()
     {
-        image_views.clear();
-        images.clear();
-        chain = nullptr;
+        image_views_.clear();
+        images_.clear();
+        chain_.clear();
     }
 
-    // deferred initialization
-    vk::ImageView getImageView(
-        vk::raii::Device const& device,
-        uint32_t                index);
-};
+    [[nodiscard]] vk::raii::SwapchainKHR const& get() const { return chain_; }
+    [[nodiscard]] vk::SurfaceFormatKHR const&   getFormat() const { return surface_format_; }
+    [[nodiscard]] vk::Extent2D const&           getExtent() const { return extent_; }
 
-SwapChain createSwapchain(
-    vk::raii::PhysicalDevice const& physical_device,
-    vk::raii::Device const&         device,
-    vk::raii::SurfaceKHR const&     surface);
-}
+    [[nodiscard]] std::tuple<vk::Result, uint32_t, vk::Image, vk::ImageView> acquireNextImage(
+        vk::raii::Device const& device,
+        uint64_t                timeout,
+        vk::Semaphore           semaphore,
+        vk::Fence               fence);
+};
+} // namespace vulkan
