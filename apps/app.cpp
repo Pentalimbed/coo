@@ -13,16 +13,6 @@ namespace {
 constexpr auto kHelloTriSpvData = std::to_array<const unsigned char>({
 #include "hello_tri.slang.spv.h"
 });
-
-[[nodiscard]] vk::raii::ShaderModule createShaderModule(const vk::raii::Device& device, std::span<const unsigned char> code)
-{
-    vk::ShaderModuleCreateInfo create_info{
-        .codeSize = code.size() * sizeof(const unsigned char),
-        .pCode    = reinterpret_cast<const uint32_t*>(code.data()),
-    };
-    return vk::raii::ShaderModule{device, create_info};
-}
-
 } // namespace
 
 // ----------------------------------------------------------------------------------------------------------------------------
@@ -49,7 +39,7 @@ void App::initVulkan()
     swap_chain_.init(device_.physical, device_.logical, surface_);
 
     // Pipeline
-    vk::raii::ShaderModule             shader_module  = createShaderModule(device_.logical, kHelloTriSpvData);
+    vk::raii::ShaderModule             shader_module  = vulkan::createShaderModule(device_.logical, kHelloTriSpvData);
     auto                               shader_stages  = std::to_array<vk::PipelineShaderStageCreateInfo>({
         {
             .stage  = vk::ShaderStageFlagBits::eVertex,

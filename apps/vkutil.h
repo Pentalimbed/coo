@@ -107,4 +107,19 @@ public:
         vk::Semaphore           semaphore,
         vk::Fence               fence);
 };
+
+/// ---------------------------------------------------------------------------------------------------------
+/// Helper Functions
+/// ---------------------------------------------------------------------------------------------------------
+
+[[nodiscard]] inline vk::raii::ShaderModule createShaderModule(
+    const vk::raii::Device&        device,
+    std::span<const unsigned char> code)
+{
+    vk::ShaderModuleCreateInfo create_info{
+        .codeSize = code.size() * sizeof(const unsigned char),
+        .pCode    = reinterpret_cast<const uint32_t*>(code.data()),
+    };
+    return vk::raii::ShaderModule{device, create_info};
+}
 } // namespace vulkan
