@@ -111,7 +111,7 @@ public:
     ~PoolHandle()
     {
         dtor_op_(obj_);
-        pool_->recycle(std::move(obj_));
+        pool_->recycle(std::move(obj_)); // befriend
     }
 
     Cls::Content const& operator*() const { return obj_; }
@@ -125,9 +125,18 @@ class FencePool {
     std::vector<vk::raii::Fence> pool_;
     std::mutex                   mutex_;
 
+    void recycle(vk::raii::Fence&& fence)
+    {
+        if (fence != nullptr) {
+            auto lock = std::scoped_lock(mutex_);
+            pool_.push_back(std::move(fence));
+        }
+    }
+
 public:
     using Content = vk::raii::Fence;
     using Handle  = PoolHandle<FencePool>;
+    friend Handle;
 
     Handle acquire(vk::raii::Device const& device)
     {
@@ -138,14 +147,6 @@ public:
         device.resetFences(*fence);
         pool_.pop_back();
         return {this, std::move(fence)};
-    }
-
-    void recycle(vk::raii::Fence&& fence)
-    {
-        if (fence != nullptr) {
-            auto lock = std::scoped_lock(mutex_);
-            pool_.push_back(std::move(fence));
-        }
     }
 };
 
@@ -165,9 +166,18 @@ class SemaphorePool {
     std::vector<vk::raii::Semaphore> pool_;
     std::mutex                       mutex_;
 
+    void recycle(vk::raii::Semaphore&& sempahore)
+    {
+        if (sempahore != nullptr) {
+            auto lock = std::scoped_lock(mutex_);
+            pool_.push_back(std::move(sempahore));
+        }
+    }
+
 public:
     using Content = vk::raii::Semaphore;
     using Handle  = PoolHandle<SemaphorePool>;
+    friend Handle;
 
     Handle acquire(vk::raii::Device const& device)
     {
@@ -179,14 +189,6 @@ public:
         pool_.pop_back();
         return {this, std::move(semaphore)};
     }
-
-    void recycle(vk::raii::Semaphore&& sempahore)
-    {
-        if (sempahore != nullptr) {
-            auto lock = std::scoped_lock(mutex_);
-            pool_.push_back(std::move(sempahore));
-        }
-    }
 };
 
 /// ---------------------------------------------------------------------------------------------------------
@@ -194,8 +196,8 @@ public:
 /// ---------------------------------------------------------------------------------------------------------
 
 [[nodiscard]] inline vk::raii::ShaderModule createShaderModule(
-    const vk::raii::Device&        device,
-    std::span<const unsigned char> code)
+    const vk::raii::Device&  device,
+    std::span<const uint8_t> code)
 {
     vk::ShaderModuleCreateInfo create_info{
         .codeSize = code.size() * sizeof(const unsigned char),

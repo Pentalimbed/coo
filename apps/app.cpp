@@ -10,7 +10,7 @@
 #include <vulkan/vulkan.hpp>
 
 namespace {
-constexpr auto kHelloTriSpvData = std::to_array<const unsigned char>({
+constexpr auto kHelloTriSpvData = std::to_array<const uint8_t>({
 #include "hello_tri.slang.spv.h"
 });
 } // namespace
@@ -67,7 +67,7 @@ void App::initVulkan()
         .minDepth = 0.0F,
         .maxDepth = 1.0F,
     };
-    vk::Rect2D                          scissor        = {vk::Offset2D{0, 0}, swap_chain_.getExtent()};
+    vk::Rect2D                          scissor        = {.offset = {.x = 0, .y = 0}, .extent = swap_chain_.getExtent()};
     vk::PipelineViewportStateCreateInfo viewport_state = {.viewportCount = 1, .pViewports = &viewport, .scissorCount = 1, .pScissors = &scissor};
 
     vk::PipelineRasterizationStateCreateInfo rasterizer{
