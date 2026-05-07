@@ -134,6 +134,7 @@ void App::mainLoop()
     while (glfwWindowShouldClose(window_) == 0) {
         glfwPollEvents();
         drawFrame();
+        frame_++;
     }
 
     device_.logical.waitIdle();
@@ -301,6 +302,4 @@ void App::drawFrame()
     perframe_data.present_fence_in_use = vulkan::isPresentFenceInUse(result);
     if ((result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR))
         recreateSwapChain();
-
-    frame_++;
 }
