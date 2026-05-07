@@ -23,6 +23,8 @@ public:
     }
 
 private:
+    uint64_t frame_;
+
     GLFWwindow* window_ = nullptr;
 
     vulkan::Context      context_;
@@ -30,14 +32,22 @@ private:
     vk::raii::SurfaceKHR surface_ = nullptr;
     vulkan::SwapChain    swap_chain_;
 
-    vk::raii::PipelineLayout m_pipeline_layout   = nullptr;
-    vk::raii::Pipeline       m_graphics_pipeline = nullptr;
+    vk::raii::PipelineLayout pipeline_layout_   = nullptr;
+    vk::raii::Pipeline       graphics_pipeline_ = nullptr;
 
-    vk::raii::CommandPool   m_command_pool      = nullptr;
-    vk::raii::CommandBuffer m_command_buffer    = nullptr;
+    constexpr static size_t kMaxFrameInFlight = 2;
+    struct PerFrame {
+        bool should_close = false;
 
-    vulkan::SemaphorePool semaphore_pool_;
-    vulkan::FencePool     fence_pool_;
+        vk::raii::CommandPool   command_pool   = nullptr;
+        vk::raii::CommandBuffer command_buffer = nullptr;
+
+        vk::raii::Semaphore acquire_semaphore    = nullptr;
+        vk::raii::Semaphore submit_semaphore     = nullptr;
+        bool                present_fence_in_use = false;
+        vk::raii::Fence     present_fence        = nullptr;
+    };
+    std::array<PerFrame, kMaxFrameInFlight> perframe_;
 
     void initWindow();
     void initVulkan();
@@ -46,5 +56,6 @@ private:
 
     void recreateSwapChain();
 
-    void recordCmdBuffer(vk::Image swap_img, vk::ImageView swap_img_view);
+    void recordCmdBuffer(vk::raii::CommandBuffer const& cmd_buffer, vk::Image swap_img, vk::ImageView swap_img_view);
+    void drawFrame();
 };

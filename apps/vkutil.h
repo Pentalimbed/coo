@@ -88,62 +88,6 @@ public:
 };
 
 /// ---------------------------------------------------------------------------------------------------------
-/// FencePool
-/// ---------------------------------------------------------------------------------------------------------
-class FencePool {
-    std::vector<vk::raii::Fence> pool_;
-    std::mutex                   mutex_;
-
-public:
-    vk::raii::Fence acquire(vk::raii::Device const& device)
-    {
-        auto lock = std::scoped_lock(mutex_);
-        if (pool_.empty())
-            return vk::raii::Fence(device, vk::FenceCreateInfo{});
-        auto fence = std::move(pool_.back());
-        device.resetFences(*fence);
-        pool_.pop_back();
-        return fence;
-    }
-
-    void recycle(vk::raii::Fence&& fence)
-    {
-        if (fence != nullptr) {
-            auto lock = std::scoped_lock(mutex_);
-            pool_.push_back(std::move(fence));
-        }
-    }
-};
-
-/// ---------------------------------------------------------------------------------------------------------
-/// SemaphorePool
-/// ---------------------------------------------------------------------------------------------------------
-class SemaphorePool {
-    std::vector<vk::raii::Semaphore> pool_;
-    std::mutex                       mutex_;
-
-public:
-    vk::raii::Semaphore acquire(vk::raii::Device const& device)
-    {
-        auto lock     = std::scoped_lock(mutex_);
-        if (pool_.empty()) {
-            return vk::raii::Semaphore(device, vk::SemaphoreCreateInfo{});
-        }
-        auto semaphore = std::move(pool_.back());
-        pool_.pop_back();
-        return semaphore;
-    }
-
-    void recycle(vk::raii::Semaphore&& sempahore)
-    {
-        if (sempahore != nullptr) {
-            auto lock = std::scoped_lock(mutex_);
-            pool_.push_back(std::move(sempahore));
-        }
-    }
-};
-
-/// ---------------------------------------------------------------------------------------------------------
 /// Helper Functions
 /// ---------------------------------------------------------------------------------------------------------
 
