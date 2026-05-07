@@ -223,26 +223,26 @@ Device createDevice(vk::raii::Instance const& instance, vk::raii::SurfaceKHR con
     std::vector<std::vector<float>>        queue_priorities(queue_family_props.size());
     std::vector<vk::DeviceQueueCreateInfo> queue_create_infos;
     {
-        util::HopcroftKarp matcher(+QueueType::kCount, static_cast<uint32_t>(queue_family_props.size()));
+        util::HopcroftKarp matcher(+QueueType::eCount, static_cast<uint32_t>(queue_family_props.size()));
         for (uint32_t qfp_index = 0; qfp_index < queue_family_props.size(); qfp_index++) {
             // gfx
             if ((queue_family_props[qfp_index].queueFlags & vk::QueueFlagBits::eGraphics) &&
                 (queue_family_props[qfp_index].queueFlags & vk::QueueFlagBits::eCompute) &&
                 (device.physical.getSurfaceSupportKHR(qfp_index, surface) == vk::True))
-                matcher.addEdge(+QueueType::kGfx, qfp_index);
+                matcher.addEdge(+QueueType::eGfx, qfp_index);
 
             // compute
             if (queue_family_props[qfp_index].queueFlags & vk::QueueFlagBits::eCompute)
-                matcher.addEdge(+QueueType::kCompute, qfp_index);
+                matcher.addEdge(+QueueType::eCompute, qfp_index);
 
             // transfer
             if (queue_family_props[qfp_index].queueFlags & vk::QueueFlagBits::eTransfer)
-                matcher.addEdge(+QueueType::kTransfer, qfp_index);
+                matcher.addEdge(+QueueType::eTransfer, qfp_index);
         }
         auto [matched, match_purpose, match_queue] = matcher.match();
 
         // register matched
-        for (uint32_t purpose = 0; purpose < +QueueType::kCount; purpose++) {
+        for (uint32_t purpose = 0; purpose < +QueueType::eCount; purpose++) {
             if (auto qfp_index = match_purpose[purpose]; qfp_index != ~0U) {
                 device.queue_indices.at(purpose) = {
                     .family = qfp_index,
@@ -252,7 +252,7 @@ Device createDevice(vk::raii::Instance const& instance, vk::raii::SurfaceKHR con
             }
         }
         // handle the rest
-        for (uint32_t purpose = 0; purpose < +QueueType::kCount; purpose++) {
+        for (uint32_t purpose = 0; purpose < +QueueType::eCount; purpose++) {
             if (auto qfp_index = match_purpose[purpose]; qfp_index == ~0U) {
                 const auto& qfp_candidates      = matcher.getAdj()[purpose];
                 auto        available_candidate = std::ranges::find_if(qfp_candidates, [&](uint32_t qfp_idx) {

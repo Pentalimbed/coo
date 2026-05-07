@@ -4,10 +4,12 @@
 #include "vkutil.h"
 
 #include <spdlog/spdlog.h>
+#include <taskflow/taskflow.hpp>
+#include <taskflow/algorithm/pipeline.hpp>
+#include <vulkan/vulkan.hpp>
 
 #include <stdexcept>
 #include <array>
-#include <vulkan/vulkan.hpp>
 
 namespace {
 constexpr auto kHelloTriSpvData = std::to_array<const uint8_t>({
@@ -112,7 +114,7 @@ void App::initVulkan()
 
     // Cmd
     vk::CommandPoolCreateInfo pool_info{.flags            = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
-                                        .queueFamilyIndex = device_.queue_indices[+vulkan::QueueType::kGfx].family};
+                                        .queueFamilyIndex = device_.queue_indices[+vulkan::QueueType::eGfx].family};
     m_command_pool = vk::raii::CommandPool(device_.logical, pool_info);
 
     vk::CommandBufferAllocateInfo alloc_info{.commandPool = m_command_pool, .level = vk::CommandBufferLevel::ePrimary, .commandBufferCount = 1};
@@ -123,10 +125,112 @@ void App::initVulkan()
 
 void App::mainLoop()
 {
-    while (glfwWindowShouldClose(window_) == 0) {
-        glfwPollEvents();
-        drawFrame();
-    }
+
+    tf::Taskflow taskflow;
+    tf::Executor executor;
+
+    constexpr size_t kMaxFrameInFlight = 2;
+    struct PerFrame {
+        bool should_close = false;
+
+        vk::raii::Semaphore acquire_semaphore    = nullptr;
+        vk::raii::Semaphore submit_semaphore     = nullptr;
+        bool                present_fence_in_use = false;
+        vk::raii::Fence     present_fence        = nullptr;
+    };
+    std::array<PerFrame, kMaxFrameInFlight> perframe;
+
+    tf::Pipeline pipeline(
+        kMaxFrameInFlight,
+
+        // Stop condition
+        tf::Pipe(tf::PipeType::SERIAL, [&](tf::Pipeflow& pf) {
+            auto& perframe_data = perframe.at(pf.line());
+            if (glfwWindowShouldClose(window_) != 0) {
+                pf.stop();
+                perframe_data.should_close = true;
+                return;
+            }
+        }),
+
+        // CPU pipe
+        tf::Pipe(tf::PipeType::PARALLEL, [this, &perframe](tf::Pipeflow& pf) {
+            auto& perframe_data = perframe.at(pf.line());
+            if (perframe_data.should_close)
+                return;
+
+            glfwPollEvents();
+
+            // Draw Frame
+
+            perframe_data.acquire_semaphore                   = semaphore_pool_.acquire(device_.logical);
+            auto [result, img_index, swap_img, swap_img_view] = swap_chain_.acquireNextImage(device_.logical, UINT64_MAX, perframe_data.acquire_semaphore, nullptr);
+            if (result == vk::Result::eErrorOutOfDateKHR) {
+                recreateSwapChain();
+                return;
+            }
+            if ((result != vk::Result::eSuccess) && (result != vk::Result::eSuboptimalKHR)) {
+                assert(result == vk::Result::eTimeout || result == vk::Result::eNotReady);
+                throw std::runtime_error("failed to acquire swap chain image!");
+            }
+
+            // Render and present
+            recordCmdBuffer(swap_img, swap_img_view);
+
+            perframe_data.submit_semaphore = semaphore_pool_.acquire(device_.logical);
+            vk::PipelineStageFlags wait_destination_stage_mask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
+            const vk::SubmitInfo   submit_info{
+                .waitSemaphoreCount   = 1,
+                .pWaitSemaphores      = &*perframe_data.acquire_semaphore,
+                .pWaitDstStageMask    = &wait_destination_stage_mask,
+                .commandBufferCount   = 1,
+                .pCommandBuffers      = &*m_command_buffer,
+                .signalSemaphoreCount = 1,
+                .pSignalSemaphores    = &*perframe_data.submit_semaphore,
+            };
+
+            auto gfx_queue = device_.getQueue(vulkan::QueueType::eGfx);
+            gfx_queue.submit(submit_info);
+
+            perframe_data.present_fence = fence_pool_.acquire(device_.logical);
+            auto present_info           = vk::StructureChain{
+                vk::PresentInfoKHR{
+                    .waitSemaphoreCount = 1,
+                    .pWaitSemaphores    = &*perframe_data.submit_semaphore,
+                    .swapchainCount     = 1,
+                    .pSwapchains        = &*swap_chain_.get(),
+                    .pImageIndices      = &img_index,
+                },
+                vk::SwapchainPresentFenceInfoEXT{
+                    .swapchainCount = 1,
+                    .pFences        = &*perframe_data.present_fence,
+                },
+            };
+            result                             = gfx_queue.presentKHR(present_info.get<vk::PresentInfoKHR>());
+            perframe_data.present_fence_in_use = vulkan::isPresentFenceInUse(result);
+            if ((result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR))
+                recreateSwapChain();
+        }),
+
+        // GPU pipe
+        tf::Pipe(tf::PipeType::PARALLEL, [this, &perframe](tf::Pipeflow& pf) {
+            auto& perframe_data = perframe.at(pf.line());
+
+            auto result = device_.logical.waitForFences(*perframe_data.present_fence, vk::True, UINT64_MAX);
+            if (result != vk::Result::eSuccess)
+                throw std::runtime_error("failed to wait for fence!");
+            semaphore_pool_.recycle(std::move(perframe_data.acquire_semaphore));
+            semaphore_pool_.recycle(std::move(perframe_data.submit_semaphore));
+            fence_pool_.recycle(std::move(perframe_data.present_fence));
+        }));
+
+    taskflow.composed_of(pipeline).name("render loop");
+    executor.run(taskflow).wait();
+
+    // while (glfwWindowShouldClose(window_) == 0) {
+    //     glfwPollEvents();
+    //     drawFrame();
+    // }
 
     device_.logical.waitIdle();
 }
@@ -197,7 +301,6 @@ void App::recordCmdBuffer(vk::Image swap_img, vk::ImageView swap_img_view)
         .colorAttachmentCount = 1,
         .pColorAttachments    = &attachment_info};
 
-    // Begin rendering
     m_command_buffer.beginRendering(rendering_info);
 
     // Rendering commands will go here
@@ -206,7 +309,6 @@ void App::recordCmdBuffer(vk::Image swap_img, vk::ImageView swap_img_view)
     m_command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swap_chain_.getExtent()));
     m_command_buffer.draw(3, 1, 0, 0);
 
-    // End rendering
     m_command_buffer.endRendering();
 
     // Transition the image layout for presentation
@@ -237,56 +339,4 @@ void App::recordCmdBuffer(vk::Image swap_img, vk::ImageView swap_img_view)
     }
 
     m_command_buffer.end();
-}
-
-void App::drawFrame()
-{
-    auto acquire_semaphore                            = semaphore_pool_.acquire(device_.logical);
-    auto [result, img_index, swap_img, swap_img_view] = swap_chain_.acquireNextImage(device_.logical, UINT64_MAX, *acquire_semaphore, nullptr);
-    if (result == vk::Result::eErrorOutOfDateKHR) {
-        recreateSwapChain();
-        return;
-    }
-    if ((result != vk::Result::eSuccess) && (result != vk::Result::eSuboptimalKHR)) {
-        assert(result == vk::Result::eTimeout || result == vk::Result::eNotReady);
-        throw std::runtime_error("failed to acquire swap chain image!");
-    }
-
-    // Render and present
-    recordCmdBuffer(swap_img, swap_img_view);
-
-    auto                   submit_semaphore = semaphore_pool_.acquire(device_.logical);
-    vk::PipelineStageFlags wait_destination_stage_mask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
-    const vk::SubmitInfo   submit_info{
-        .waitSemaphoreCount   = 1,
-        .pWaitSemaphores      = &**acquire_semaphore,
-        .pWaitDstStageMask    = &wait_destination_stage_mask,
-        .commandBufferCount   = 1,
-        .pCommandBuffers      = &*m_command_buffer,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores    = &**submit_semaphore,
-    };
-
-    auto gfx_queue = device_.getQueue(vulkan::QueueType::kGfx);
-    gfx_queue.submit(submit_info);
-
-    auto present_fence = fence_pool_.acquire(device_.logical);
-    auto present_info  = vk::StructureChain{
-        vk::PresentInfoKHR{
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores    = &**submit_semaphore,
-            .swapchainCount     = 1,
-            .pSwapchains        = &*swap_chain_.get(),
-            .pImageIndices      = &img_index,
-        },
-        vk::SwapchainPresentFenceInfoEXT{
-            .swapchainCount = 1,
-            .pFences        = &**present_fence,
-        },
-    };
-    result = gfx_queue.presentKHR(present_info.get<vk::PresentInfoKHR>());
-    if (vulkan::isPresentFenceInUse(result))
-        vulkan::fenceInUse(present_fence, device_.logical);
-    if ((result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR))
-        recreateSwapChain();
 }
