@@ -2,11 +2,13 @@
 
 #include "syntax.h"
 
+#include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
 
 #include <array>
-#include <memory>
+#include <functional>
 #include <mutex>
+#include <utility>
 
 namespace vulkan {
 enum class QueueType : uint8_t {
@@ -19,62 +21,6 @@ enum class QueueType : uint8_t {
 struct QueueIndex {
     uint32_t family;
     uint32_t queue;
-};
-
-/// ---------------------------------------------------------------------------------------------------------
-/// FencePool
-/// ---------------------------------------------------------------------------------------------------------
-class FencePool {
-    std::vector<vk::raii::Fence> pool_;
-    std::mutex                   mutex_;
-
-public:
-    vk::raii::Fence acquire(vk::raii::Device const& device)
-    {
-        auto lock = std::scoped_lock(mutex_);
-        if (pool_.empty())
-            return vk::raii::Fence(device, {.flags = vk::FenceCreateFlagBits::eSignaled});
-        auto fence = std::move(pool_.back());
-        device.resetFences(*fence);
-        pool_.pop_back();
-        return fence;
-    }
-
-    void recycle(vk::raii::Fence&& fence)
-    {
-        if (fence != nullptr) {
-            auto lock = std::scoped_lock(mutex_);
-            pool_.push_back(std::move(fence));
-        }
-    }
-};
-
-/// ---------------------------------------------------------------------------------------------------------
-/// SemaphorePool
-/// ---------------------------------------------------------------------------------------------------------
-class SemaphorePool {
-    std::vector<vk::raii::Semaphore> pool_;
-    std::mutex                       mutex_;
-
-public:
-    vk::raii::Semaphore acquire(vk::raii::Device const& device)
-    {
-        auto lock     = std::scoped_lock(mutex_);
-        if (pool_.empty()) {
-            return vk::raii::Semaphore(device, {});
-        }
-        auto semaphore = std::move(pool_.back());
-        pool_.pop_back();
-        return semaphore;
-    }
-
-    void recycle(vk::raii::Semaphore&& sempahore)
-    {
-        if (sempahore != nullptr) {
-            auto lock = std::scoped_lock(mutex_);
-            pool_.push_back(std::move(sempahore));
-        }
-    }
 };
 
 /// ---------------------------------------------------------------------------------------------------------
@@ -142,6 +88,108 @@ public:
 };
 
 /// ---------------------------------------------------------------------------------------------------------
+/// PoolHandle
+/// ---------------------------------------------------------------------------------------------------------
+template <class Cls>
+class PoolHandle {
+public:
+    using DtorFn = std::function<void(typename Cls::Content const&)>;
+
+private:
+    Cls*         pool_;
+    Cls::Content obj_;
+    DtorFn       dtor_op_;
+
+public:
+    PoolHandle(Cls* pool, Cls::Content&& obj, DtorFn dtor_op = [](Cls::Content const&) {}) :
+        pool_(pool), obj_(std::move(obj)), dtor_op_(std::move(dtor_op)) {}
+    PoolHandle()                             = delete;
+    PoolHandle(PoolHandle const&)            = delete;
+    PoolHandle& operator=(PoolHandle const&) = delete;
+    PoolHandle(PoolHandle&&)                 = default;
+    PoolHandle& operator=(PoolHandle&&)      = default;
+    ~PoolHandle()
+    {
+        dtor_op_(obj_);
+        pool_->recycle(std::move(obj_));
+    }
+
+    Cls::Content const& operator*() const { return obj_; }
+    void                assignDtorOp(DtorFn dtor_op) { dtor_op_ = std::move(dtor_op); }
+};
+
+/// ---------------------------------------------------------------------------------------------------------
+/// FencePool
+/// ---------------------------------------------------------------------------------------------------------
+class FencePool {
+    std::vector<vk::raii::Fence> pool_;
+    std::mutex                   mutex_;
+
+public:
+    using Content = vk::raii::Fence;
+    using Handle  = PoolHandle<FencePool>;
+
+    Handle acquire(vk::raii::Device const& device)
+    {
+        auto lock = std::scoped_lock(mutex_);
+        if (pool_.empty())
+            return {this, vk::raii::Fence(device, vk::FenceCreateInfo{})};
+        auto fence = std::move(pool_.back());
+        device.resetFences(*fence);
+        pool_.pop_back();
+        return {this, std::move(fence)};
+    }
+
+    void recycle(vk::raii::Fence&& fence)
+    {
+        if (fence != nullptr) {
+            auto lock = std::scoped_lock(mutex_);
+            pool_.push_back(std::move(fence));
+        }
+    }
+};
+
+void inline fenceInUse(FencePool::Handle& handle, vk::Device device)
+{
+    handle.assignDtorOp([device](vk::raii::Fence const& fence) {
+        auto result = device.waitForFences(*fence, vk::True, UINT64_MAX);
+        if (result != vk::Result::eSuccess)
+            throw std::runtime_error("failed to wait for fence!");
+    });
+}
+
+/// ---------------------------------------------------------------------------------------------------------
+/// SemaphorePool
+/// ---------------------------------------------------------------------------------------------------------
+class SemaphorePool {
+    std::vector<vk::raii::Semaphore> pool_;
+    std::mutex                       mutex_;
+
+public:
+    using Content = vk::raii::Semaphore;
+    using Handle  = PoolHandle<SemaphorePool>;
+
+    Handle acquire(vk::raii::Device const& device)
+    {
+        auto lock = std::scoped_lock(mutex_);
+        if (pool_.empty()) {
+            return {this, vk::raii::Semaphore(device, vk::SemaphoreCreateInfo{})};
+        }
+        auto semaphore = std::move(pool_.back());
+        pool_.pop_back();
+        return {this, std::move(semaphore)};
+    }
+
+    void recycle(vk::raii::Semaphore&& sempahore)
+    {
+        if (sempahore != nullptr) {
+            auto lock = std::scoped_lock(mutex_);
+            pool_.push_back(std::move(sempahore));
+        }
+    }
+};
+
+/// ---------------------------------------------------------------------------------------------------------
 /// Helper Functions
 /// ---------------------------------------------------------------------------------------------------------
 
@@ -155,4 +203,6 @@ public:
     };
     return vk::raii::ShaderModule{device, create_info};
 }
+
+[[nodiscard]] bool isPresentFenceInUse(vk::Result present_result);
 } // namespace vulkan

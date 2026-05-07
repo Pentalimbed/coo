@@ -241,17 +241,8 @@ void App::recordCmdBuffer(vk::Image swap_img, vk::ImageView swap_img_view)
 
 void App::drawFrame()
 {
-    if (m_present_fence != nullptr) {
-        auto fence_result = device_.logical.waitForFences(*m_present_fence, vk::True, UINT64_MAX);
-        if (fence_result != vk::Result::eSuccess)
-            throw std::runtime_error("failed to wait for fence!");
-        fence_pool_.recycle(std::move(m_present_fence));
-        semaphore_pool_.recycle(std::move(m_acquire_semaphore));
-        semaphore_pool_.recycle(std::move(m_submit_semaphore));
-    }
-
-    m_acquire_semaphore                               = semaphore_pool_.acquire(device_.logical);
-    auto [result, img_index, swap_img, swap_img_view] = swap_chain_.acquireNextImage(device_.logical, UINT64_MAX, m_acquire_semaphore, nullptr);
+    auto acquire_semaphore                            = semaphore_pool_.acquire(device_.logical);
+    auto [result, img_index, swap_img, swap_img_view] = swap_chain_.acquireNextImage(device_.logical, UINT64_MAX, *acquire_semaphore, nullptr);
     if (result == vk::Result::eErrorOutOfDateKHR) {
         recreateSwapChain();
         return;
@@ -264,37 +255,38 @@ void App::drawFrame()
     // Render and present
     recordCmdBuffer(swap_img, swap_img_view);
 
-    m_submit_semaphore = semaphore_pool_.acquire(device_.logical);
+    auto                   submit_semaphore = semaphore_pool_.acquire(device_.logical);
     vk::PipelineStageFlags wait_destination_stage_mask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
     const vk::SubmitInfo   submit_info{
         .waitSemaphoreCount   = 1,
-        .pWaitSemaphores      = &*m_acquire_semaphore,
+        .pWaitSemaphores      = &**acquire_semaphore,
         .pWaitDstStageMask    = &wait_destination_stage_mask,
         .commandBufferCount   = 1,
         .pCommandBuffers      = &*m_command_buffer,
         .signalSemaphoreCount = 1,
-        .pSignalSemaphores    = &*m_submit_semaphore,
+        .pSignalSemaphores    = &**submit_semaphore,
     };
 
     auto gfx_queue = device_.getQueue(vulkan::QueueType::kGfx);
     gfx_queue.submit(submit_info);
 
-    m_present_fence   = fence_pool_.acquire(device_.logical);
-    auto present_info = vk::StructureChain{
+    auto present_fence = fence_pool_.acquire(device_.logical);
+    auto present_info  = vk::StructureChain{
         vk::PresentInfoKHR{
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores    = &*m_submit_semaphore,
+            .pWaitSemaphores    = &**submit_semaphore,
             .swapchainCount     = 1,
             .pSwapchains        = &*swap_chain_.get(),
             .pImageIndices      = &img_index,
         },
         vk::SwapchainPresentFenceInfoEXT{
             .swapchainCount = 1,
-            .pFences        = &*m_present_fence,
+            .pFences        = &**present_fence,
         },
     };
     result = gfx_queue.presentKHR(present_info.get<vk::PresentInfoKHR>());
-    if ((result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR)) {
+    if (vulkan::isPresentFenceInUse(result))
+        vulkan::fenceInUse(present_fence, device_.logical);
+    if ((result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR))
         recreateSwapChain();
-    }
 }

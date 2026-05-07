@@ -39,11 +39,7 @@ private:
     vk::raii::CommandBuffer m_command_buffer    = nullptr;
 
     vulkan::SemaphorePool semaphore_pool_;
-    vk::raii::Semaphore   m_acquire_semaphore = nullptr;
-    vk::raii::Semaphore   m_submit_semaphore  = nullptr;
-
-    vulkan::FencePool fence_pool_;
-    vk::raii::Fence   m_present_fence = nullptr;
+    vulkan::FencePool     fence_pool_;
 
     void initWindow();
     void initVulkan();
