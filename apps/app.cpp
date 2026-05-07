@@ -35,7 +35,7 @@ void App::initVulkan()
     surface_ = vk::raii::SurfaceKHR(context_.instance, vk_surface);
 
     device_ = vulkan::createDevice(context_.instance, surface_);
-    
+
     swap_chain_.init(device_.physical, device_.logical, surface_);
 
     // Pipeline
@@ -118,11 +118,6 @@ void App::initVulkan()
     vk::CommandBufferAllocateInfo alloc_info{.commandPool = m_command_pool, .level = vk::CommandBufferLevel::ePrimary, .commandBufferCount = 1};
     m_command_buffer = std::move(vk::raii::CommandBuffers(device_.logical, alloc_info).front());
 
-    // Sync objs
-    m_acquire_semaphore = vk::raii::Semaphore(device_.logical, vk::SemaphoreCreateInfo());
-    m_submit_semaphore  = vk::raii::Semaphore(device_.logical, vk::SemaphoreCreateInfo());
-    m_present_fence     = vk::raii::Fence(device_.logical, {.flags = vk::FenceCreateFlagBits::eSignaled});
-
     spdlog::info("Vulkan initialized!");
 }
 
@@ -150,11 +145,6 @@ void App::recreateSwapChain()
     while (width == 0 || height == 0) {
         glfwGetFramebufferSize(window_, &width, &height);
         glfwWaitEvents();
-    }
-
-    auto fence_result = device_.logical.waitForFences(*m_present_fence, vk::True, UINT64_MAX);
-    if (fence_result != vk::Result::eSuccess) {
-        throw std::runtime_error("failed to wait for fence!");
     }
 
     swap_chain_.init(device_.physical, device_.logical, surface_);
@@ -251,11 +241,16 @@ void App::recordCmdBuffer(vk::Image swap_img, vk::ImageView swap_img_view)
 
 void App::drawFrame()
 {
-    auto fence_result = device_.logical.waitForFences(*m_present_fence, vk::True, UINT64_MAX);
-    if (fence_result != vk::Result::eSuccess) {
-        throw std::runtime_error("failed to wait for fence!");
+    if (m_present_fence != nullptr) {
+        auto fence_result = device_.logical.waitForFences(*m_present_fence, vk::True, UINT64_MAX);
+        if (fence_result != vk::Result::eSuccess)
+            throw std::runtime_error("failed to wait for fence!");
+        fence_pool_.recycle(std::move(m_present_fence));
+        semaphore_pool_.recycle(std::move(m_acquire_semaphore));
+        semaphore_pool_.recycle(std::move(m_submit_semaphore));
     }
 
+    m_acquire_semaphore                               = semaphore_pool_.acquire(device_.logical);
     auto [result, img_index, swap_img, swap_img_view] = swap_chain_.acquireNextImage(device_.logical, UINT64_MAX, m_acquire_semaphore, nullptr);
     if (result == vk::Result::eErrorOutOfDateKHR) {
         recreateSwapChain();
@@ -269,6 +264,7 @@ void App::drawFrame()
     // Render and present
     recordCmdBuffer(swap_img, swap_img_view);
 
+    m_submit_semaphore = semaphore_pool_.acquire(device_.logical);
     vk::PipelineStageFlags wait_destination_stage_mask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
     const vk::SubmitInfo   submit_info{
         .waitSemaphoreCount   = 1,
@@ -283,7 +279,7 @@ void App::drawFrame()
     auto gfx_queue = device_.getQueue(vulkan::QueueType::kGfx);
     gfx_queue.submit(submit_info);
 
-    device_.logical.resetFences(*m_present_fence);
+    m_present_fence   = fence_pool_.acquire(device_.logical);
     auto present_info = vk::StructureChain{
         vk::PresentInfoKHR{
             .waitSemaphoreCount = 1,
