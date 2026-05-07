@@ -247,7 +247,7 @@ void App::recordCmdBuffer(vk::raii::CommandBuffer const& cmd_buffer, vk::Image s
 
 void App::drawFrame()
 {
-    auto& perframe_data = perframe_.at(frame_ % 2);
+    auto& perframe_data = perframe_.at(frame_ % kFramesInFlight);
 
     if (perframe_data.present_fence_in_use) {
         auto result = device_.logical.waitForFences(*perframe_data.present_fence, vk::True, UINT64_MAX);

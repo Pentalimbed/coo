@@ -35,7 +35,7 @@ private:
     vk::raii::PipelineLayout pipeline_layout_   = nullptr;
     vk::raii::Pipeline       graphics_pipeline_ = nullptr;
 
-    constexpr static size_t kMaxFrameInFlight = 2;
+    constexpr static size_t kFramesInFlight = 2;
     struct PerFrame {
         bool should_close = false;
 
@@ -47,7 +47,7 @@ private:
         bool                present_fence_in_use = false;
         vk::raii::Fence     present_fence        = nullptr;
     };
-    std::array<PerFrame, kMaxFrameInFlight> perframe_;
+    std::array<PerFrame, kFramesInFlight> perframe_;
 
     void initWindow();
     void initVulkan();
