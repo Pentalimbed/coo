@@ -300,6 +300,11 @@ Device createDevice(vk::raii::Instance const& instance, vk::raii::SurfaceKHR con
         device.logical = vk::raii::Device(device.physical, device_create_info);
     }
 
+    // allocator
+    device.allocator = vma::raii::Allocator(
+        instance, device.logical,
+        vma::AllocatorCreateInfo{.flags = {}, .physicalDevice = device.physical});
+
     return device;
 }
 

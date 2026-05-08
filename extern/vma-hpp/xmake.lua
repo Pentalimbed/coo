@@ -1,0 +1,5 @@
+target("vma-hpp")
+    set_kind("static")
+    add_files("impl.cpp")
+    add_headerfiles("./*.hpp")
+    add_includedirs(".", {public = true})

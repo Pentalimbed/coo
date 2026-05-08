@@ -1,16 +1,11 @@
+set_project("coo")
+set_version("1.0.0")
+
+includes("extern")
+
 set_languages("c17", "cxx23")
 
-add_requires(
-    "spdlog 1.17.0",
-    "glfw 3.4",
-    "glm 1.0.3",
-    "taskflow 4.0.0",
-    "vulkansdk")
-
 add_rules("mode.debug", "mode.release")
-
-set_policy("build.warning", true)
-set_warnings("all", "extra")
 
 rule("slang2spv")
     set_extensions(".slang")
@@ -71,11 +66,23 @@ rule("slang2spv")
         batchcmds:set_depmtime(os.mtime(outputfile))
         batchcmds:set_depcache(target:dependfile(outputfile))
     end)
+rule_end()
+
+add_requires(
+    "spdlog 1.17.0",
+    "glfw 3.4",
+    "glm 1.0.3",
+    "taskflow 4.0.0",
+    "vulkansdk")
 
 target("test")
+    set_policy("build.warning", true)
+    set_warnings("all", "extra")
+
     set_kind("binary") 
     add_files("apps/*.cpp")
-    add_packages("vulkansdk", "spdlog", "taskflow", "glfw", "glm")
+    add_packages("glfw", "glm", "spdlog", "taskflow", "vulkansdk")
+    add_deps("vma-hpp")
 
     add_defines(
         "VULKAN_HPP_NO_STRUCT_CONSTRUCTORS",

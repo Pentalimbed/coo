@@ -57,8 +57,16 @@ void App::initVulkan()
         .dynamicStateCount = static_cast<uint32_t>(dynamic_states.size()),
         .pDynamicStates    = dynamic_states.data(),
     };
-    vk::PipelineVertexInputStateCreateInfo   vertex_input_info;
+
+    auto                                     binding_description    = Vertex::getBindingDescription();
+    auto                                     attribute_descriptions = Vertex::getAttributeDescriptions();
+    vk::PipelineVertexInputStateCreateInfo   vertex_input_info      = {.vertexBindingDescriptionCount   = 1,
+                                                                       .pVertexBindingDescriptions      = &binding_description,
+                                                                       .vertexAttributeDescriptionCount = static_cast<uint32_t>(attribute_descriptions.size()),
+                                                                       .pVertexAttributeDescriptions    = attribute_descriptions.data()};
+
     vk::PipelineInputAssemblyStateCreateInfo input_assembly = {.topology = vk::PrimitiveTopology::eTriangleList};
+                                                                       
     vk::Viewport                             viewport{
         .x        = 0.0F,
         .y        = 0.0F,
@@ -124,6 +132,38 @@ void App::initVulkan()
         data.acquire_semaphore = vk::raii::Semaphore(device_.logical, vk::SemaphoreCreateInfo{});
         data.submit_semaphore  = vk::raii::Semaphore(device_.logical, vk::SemaphoreCreateInfo{});
         data.present_fence     = vk::raii::Fence(device_.logical, vk::FenceCreateInfo{});
+    }
+
+    // buffer
+    const size_t data_size = sizeof(vertices[0]) * vertices.size();
+    vertex_buffer_         = device_.allocator.createBuffer(
+        vk::BufferCreateInfo{
+            .size        = data_size,
+            .usage       = vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            .sharingMode = vk::SharingMode::eExclusive},
+        vma::AllocationCreateInfo{
+            .usage = vma::MemoryUsage::eAuto,
+        });
+
+    {
+        auto staging_buffer = device_.allocator.createBuffer(
+            vk::BufferCreateInfo{
+                .size        = data_size,
+                .usage       = vk::BufferUsageFlagBits::eTransferSrc,
+                .sharingMode = vk::SharingMode::eExclusive},
+            vma::AllocationCreateInfo{
+                .flags = vma::AllocationCreateFlags::BitsType::eHostAccessSequentialWrite,
+                .usage = vma::MemoryUsage::eAuto,
+            });
+        staging_buffer.getAllocation().copyFromMemory(vertices.data(), 0, data_size);
+
+        vk::CommandBuffer temp_cmd_buffer = perframe_.front().command_buffer;
+        temp_cmd_buffer.begin({.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
+        temp_cmd_buffer.copyBuffer(*staging_buffer, *vertex_buffer_, vk::BufferCopy(0, 0, data_size));
+        temp_cmd_buffer.end();
+        auto queue = device_.getQueue(vulkan::QueueType::eGfx);
+        queue.submit(vk::SubmitInfo{.commandBufferCount = 1, .pCommandBuffers = &temp_cmd_buffer}, nullptr);
+        queue.waitIdle();
     }
 
     spdlog::info("Vulkan initialized!");
@@ -210,9 +250,10 @@ void App::recordCmdBuffer(vk::raii::CommandBuffer const& cmd_buffer, vk::Image s
 
     // Rendering commands will go here
     cmd_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphics_pipeline_);
+    cmd_buffer.bindVertexBuffers(0, *vertex_buffer_, {0});
     cmd_buffer.setViewport(0, vk::Viewport(0.0F, 0.0F, static_cast<float>(swap_chain_.getExtent().width), static_cast<float>(swap_chain_.getExtent().height), 0.0F, 1.0F));
     cmd_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swap_chain_.getExtent()));
-    cmd_buffer.draw(3, 1, 0, 0);
+    cmd_buffer.draw(static_cast<uint32_t>(vertices.size()), 1, 0, 0);
 
     cmd_buffer.endRendering();
 

@@ -4,11 +4,9 @@
 
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
+#include <vk_mem_alloc_raii.hpp>
 
 #include <array>
-#include <functional>
-#include <mutex>
-#include <utility>
 
 namespace vulkan {
 enum class QueueType : uint8_t {
@@ -40,6 +38,7 @@ Context createContext();
 struct Device {
     vk::raii::PhysicalDevice physical = nullptr;
     vk::raii::Device         logical  = nullptr;
+    vma::raii::Allocator     allocator = nullptr;
 
     std::array<QueueIndex, +QueueType::eCount> queue_indices;
 
