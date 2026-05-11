@@ -121,8 +121,10 @@ void App::initVulkan()
     // Per frame data
     for (auto& data : perframe_) {
         // Cmd
-        vk::CommandPoolCreateInfo pool_info{.flags            = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
-                                            .queueFamilyIndex = device_.queue_indices[+vulkan::QueueType::eGfx].family};
+        vk::CommandPoolCreateInfo pool_info{
+            .flags            = {},
+            .queueFamilyIndex = device_.queue_indices[+vulkan::QueueType::eGfx].family,
+        };
         data.command_pool = vk::raii::CommandPool(device_.logical, pool_info);
 
         vk::CommandBufferAllocateInfo alloc_info{.commandPool = data.command_pool, .level = vk::CommandBufferLevel::ePrimary, .commandBufferCount = 1};
@@ -231,7 +233,7 @@ void App::recordCmdBuffer(vk::raii::CommandBuffer const& cmd_buffer, vk::Image s
     }
 
     // Set up the color attachment
-    vk::ClearValue              clear_color     = vk::ClearColorValue(0.0F, 0.0F, 0.0F, 1.0F);
+    vk::ClearValue              clear_color     = vk::ClearColorValue(0.05F, 0.05F, 0.1F, 1.0F);
     vk::RenderingAttachmentInfo attachment_info = {
         .imageView   = swap_img_view,
         .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
@@ -310,6 +312,7 @@ void App::drawFrame()
     }
 
     // Render and present
+    perframe_data.command_pool.reset();
     recordCmdBuffer(perframe_data.command_buffer, swap_img, swap_img_view);
 
     vk::PipelineStageFlags wait_destination_stage_mask(vk::PipelineStageFlagBits::eColorAttachmentOutput);

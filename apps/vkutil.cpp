@@ -377,18 +377,20 @@ std::tuple<vk::Result, uint32_t, vk::Image, vk::ImageView> SwapChain::acquireNex
 bool isPresentFenceInUse(vk::Result present_result)
 {
     switch (present_result) {
-        case vk::Result::eSuccess:
-        case vk::Result::eSuboptimalKHR:
-        case vk::Result::eErrorSurfaceLostKHR:
-        case vk::Result::eErrorOutOfDateKHR:
-        case vk::Result::eErrorPresentTimingQueueFullEXT:
+        using enum vk::Result;
+
+        case eSuccess:
+        case eSuboptimalKHR:
+        case eErrorSurfaceLostKHR:
+        case eErrorOutOfDateKHR:
+        case eErrorPresentTimingQueueFullEXT:
 #if defined(VK_USE_PLATFORM_WIN32_KHR)
-        case vk::Result::eErrorFullScreenExclusiveModeLostEXT:
+        case eErrorFullScreenExclusiveModeLostEXT:
 #endif /*VK_USE_PLATFORM_WIN32_KHR*/
             return true;
-        case vk::Result::eErrorOutOfHostMemory:
-        case vk::Result::eErrorOutOfDeviceMemory:
-        case vk::Result::eErrorDeviceLost:
+        case eErrorOutOfHostMemory:
+        case eErrorOutOfDeviceMemory:
+        case eErrorDeviceLost:
             return false;
         default:
             std::unreachable();

@@ -18,6 +18,8 @@ AlignAfterOpenBracket: Align
 # someLongFunction(argument1,
 #                  argument2);
 
+AlignArrayOfStructures: Left
+
 # If true, aligns consecutive C/C++ preprocessor macros.
 AlignConsecutiveMacros: true
 # true:
