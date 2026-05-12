@@ -80,7 +80,7 @@ target("test")
     set_warnings("all", "extra")
 
     set_kind("binary") 
-    add_files("apps/*.cpp")
+    add_files("src/*.cpp")
     add_packages("glfw", "glm", "spdlog", "taskflow", "vulkansdk")
     add_deps("vma-hpp")
 
@@ -89,4 +89,4 @@ target("test")
         "VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS")
 
     add_rules("slang2spv", {bin2c = true})
-    add_files("apps/*.slang")
+    add_files("src/*.slang")
